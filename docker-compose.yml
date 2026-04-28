@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: hris-kpi-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: hris_kpi
+    ports:
+      - '5432:5432'
+    volumes:
+      - hris-kpi-postgres:/var/lib/postgresql/data
+
+volumes:
+  hris-kpi-postgres:
