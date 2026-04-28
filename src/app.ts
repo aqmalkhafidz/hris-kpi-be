@@ -346,6 +346,7 @@ crud('/org/positions', positions, (body, id) => ({
   title: String(body.title ?? ''),
   level: String(body.level ?? ''),
   dept: String(body.dept ?? ''),
+  deptId: Number(body.deptId ?? 0),
   template: String(body.template ?? ''),
   headcount: Number(body.headcount ?? 0),
 }));
@@ -358,7 +359,9 @@ crud('/org/employees', employees, (body, id) => ({
   nip: String(body.nip ?? ''),
   position: String(body.position ?? ''),
   dept: String(body.dept ?? ''),
+  deptId: Number(body.deptId ?? 0),
   div: String(body.div ?? body.division ?? ''),
+  divId: Number(body.divId ?? 0),
   division: String(body.division ?? body.div ?? ''),
   manager: String(body.manager ?? ''),
   squad: body.squad == null ? null : String(body.squad),
@@ -377,6 +380,7 @@ crud('/org/job-titles', jobTitles, (body, id) => ({
   name: String(body.name ?? ''),
   level: String(body.level ?? ''),
   department: String(body.department ?? ''),
+  deptId: Number(body.deptId ?? 0),
   description: String(body.description ?? ''),
   headcount: Number(body.headcount ?? 0),
 }));
@@ -430,7 +434,7 @@ async function distributionRows(cycleId: number) {
     const template =
       templateRows.find(
         (item) =>
-          item.dept === employee.dept &&
+          item.deptId === employee.deptId &&
           employee.position.toLowerCase().includes(item.name.toLowerCase())
       ) ?? null;
     const sl =
@@ -438,13 +442,13 @@ async function distributionRows(cycleId: number) {
         (user) => user.name === employee.manager && user.role === 'sl'
       ) ?? null;
     const department = departmentRows.find(
-      (item) => item.name === employee.dept
+      (item) => item.id === employee.deptId
     );
     const hod = department
       ? (userRows.find((user) => user.id === department.headId) ?? null)
       : null;
     const division = divisionRows.find(
-      (item) => item.name === employee.division
+      (item) => item.id === employee.divId
     );
     const hodiv = division
       ? (userRows.find((user) => user.id === division.headId) ?? null)
