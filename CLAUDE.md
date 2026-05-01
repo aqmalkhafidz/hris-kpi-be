@@ -8,7 +8,7 @@ Backend HRIS KPI / Performa. Stack: **Hono + Drizzle ORM + Postgres + Zod + JWT 
 | ----------------------- | ----------------------------------------------------------------------------------------------- |
 | `src/`                  | Kode sumber TypeScript. Entry → [src/index.ts](src/index.ts).                                   |
 | `dist/`                 | Output `tsc` (jangan edit manual).                                                              |
-| `drizzle/`              | Migrasi SQL (auto-generated dari schema lewat `npm run db:generate`).                           |
+| `drizzle/`              | Migrasi SQL — jangan edit manual, tapi boleh tulis manual untuk DDL sederhana.                  |
 | `uploads/`              | Folder file evidence yang di-upload user. Disajikan via `GET /uploads/*`.                       |
 | `docker-compose.yml`    | Postgres lokal untuk dev.                                                                       |
 | `drizzle.config.ts`     | Konfigurasi drizzle-kit (path schema + DB URL).                                                 |
@@ -17,26 +17,22 @@ Backend HRIS KPI / Performa. Stack: **Hono + Drizzle ORM + Postgres + Zod + JWT 
 
 ## src/
 
-| File / Folder                          | Tanggung Jawab                                                                                                                                                                                                                                              |
-| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [index.ts](src/index.ts)               | Bootstrap server. Panggil `serve()` di port `PORT` (default 4000).                                                                                                                                                                                          |
-| [app.ts](src/app.ts)                   | **Definisi semua route Hono** (~833 baris). Middleware (CORS, auth), validasi Zod, handler endpoint untuk auth, appraisal, org (divisions/departments/positions/employees/job_titles/squads), cycles, kra-templates, reviews, dashboards, reports, uploads. |
-| [repositories.ts](src/repositories.ts) | Query layer. `loadAppraisal`, `loadKras`, `loadAudit`, `replaceKras`, `templatesWithItems`, `recalculateCycleStats`. Query DB + serialisasi.                                                                                                                |
-| [serializers.ts](src/serializers.ts)   | Map row DB → bentuk JSON yang dikonsumsi FE (snake_case untuk field appraisal/audit, camelCase untuk lainnya). `initialsOf()` helper.                                                                                                                       |
-| [types.ts](src/types.ts)               | Type literal: `UserRole`, `ReviewerKey`, `AppraisalStatus`, `AuditAction`, `ActorInfo`.                                                                                                                                                                     |
+| File / Folder                          | Tanggung Jawab                                                                                                                                                                                                                                                   |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [index.ts](src/index.ts)               | Bootstrap server. Panggil `serve()` di port `PORT` (default 4000).                                                                                                                                                                                               |
+| [app.ts](src/app.ts)                   | **Definisi semua route Hono**. Middleware (CORS, auth), validasi Zod, handler endpoint untuk auth, appraisal, org (divisions/departments/positions/employees/job_titles/squads), cycles, kra-templates, reviews, dashboards, reports, uploads.                    |
+| [repositories.ts](src/repositories.ts) | Query layer. `loadAppraisal`, `loadKras`, `loadAudit`, `replaceKras`, `templatesWithItems`, `recalculateCycleStats`. Query DB + serialisasi.                                                                                                                     |
+| [serializers.ts](src/serializers.ts)   | Map row DB → bentuk JSON yang dikonsumsi FE. `initialsOf(name)` helper — initials selalu dihitung dari nama, tidak disimpan di `users`.                                                                                                                          |
+| [types.ts](src/types.ts)               | Type literal: `UserRole`, `ReviewerKey`, `AppraisalStatus`, `AuditAction`, `ActorInfo`.                                                                                                                                                                          |
 
 ### src/db/
 
-Lapisan database (Drizzle).
-
-| File                          | Isi                                                                                                                                                                                                                             |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [client.ts](src/db/client.ts) | Inisialisasi `postgres-js` connection pool + `drizzle()` instance. Export `db` & `sql`.                                                                                                                                         |
-| [schema.ts](src/db/schema.ts) | Definisi tabel: `users`, `divisions`, `departments`, `positions`, `employees`, `cycles`, `kraTemplates`, `kraTemplateItems`, `appraisals`, `kras`, `evidence`, `auditEntries`, `jobTitles`, `squads`. Plus type `$inferSelect`. |
+| File                          | Isi                                                                          |
+| ----------------------------- | ---------------------------------------------------------------------------- |
+| [client.ts](src/db/client.ts) | Inisialisasi `postgres-js` connection pool + `drizzle()` instance.           |
+| [schema.ts](src/db/schema.ts) | Definisi semua tabel. Lihat bagian **Schema** di bawah untuk detail kolom.   |
 
 ### src/domain/
-
-Pure business rules (tanpa I/O).
 
 | File                                    | Isi                                                                                                                                                                                                                                         |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -44,47 +40,96 @@ Pure business rules (tanpa I/O).
 
 ### src/http/
 
-Helper HTTP cross-cutting.
-
-| File                          | Isi                                                                                                                    |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| [auth.ts](src/http/auth.ts)   | JWT (jose HS256, expiry 8 jam). Export `signToken`, `verifyToken`, `authMiddleware`, `toAuthUser`, type `AuthUser`.    |
-| [error.ts](src/http/error.ts) | `HttpError` class, helper `fail(status, msg)` (throw), `jsonError(c, error)` (renderer). Dipasang via `app.onError()`. |
+| File                          | Isi                                                                                                                         |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| [auth.ts](src/http/auth.ts)   | JWT (jose HS256, expiry 8 jam). `AuthUser = { id, email, name, role }`. `toAuthUser(user, role)` — role diambil terpisah.   |
+| [error.ts](src/http/error.ts) | `HttpError`, `fail(status, msg)`, `jsonError(c, error)`.                                                                    |
 
 ### src/scripts/
 
-CLI utilities (jalan via `tsx`).
+| File                                 | Fungsi                                                                |
+| ------------------------------------ | --------------------------------------------------------------------- |
+| [migrate.ts](src/scripts/migrate.ts) | Apply migrasi `drizzle/*.sql` ke DB. `npm run db:migrate`.            |
+| [seed.ts](src/scripts/seed.ts)       | Isi data demo 13 user/employee. Password semua: `demo1234`.           |
+| [smoke.ts](src/scripts/smoke.ts)     | Test sanity end-to-end. `npm run smoke`.                              |
 
-| File                                 | Fungsi                                                                                        |
-| ------------------------------------ | --------------------------------------------------------------------------------------------- |
-| [migrate.ts](src/scripts/migrate.ts) | Apply migrasi `drizzle/*.sql` ke DB. Dipanggil `npm run db:migrate`.                          |
-| [seed.ts](src/scripts/seed.ts)       | Isi data demo (users, divisions, dept, employees, cycles, templates, dst). `npm run db:seed`. |
-| [smoke.ts](src/scripts/smoke.ts)     | Test sanity end-to-end terhadap server berjalan. `npm run smoke`.                             |
+## Schema
 
-## drizzle/
+### `users` — auth only
+`id, email, password_hash, name, created_at, updated_at`
 
-Migrasi SQL berurutan:
+Tidak menyimpan org data apapun. Role, dept, div, squad, position semuanya ada di `employees`.
+- `created_at`: saat akun dibuat
+- `updated_at`: diset saat password diubah via `POST /auth/change-password`
 
-- `0000_initial.sql` — skema awal (users, appraisals, kras, evidence, audit_entries, dst).
-- `0001_numeric_sequence_ids.sql` — konversi ID ke serial integer.
-- `0002_calibration.sql` — tambah `calibrated_score`, `final_grade`, `calibrated_at` di `appraisals`.
-- `0003_job_titles.sql` — tabel `job_titles`.
-- `0004_squads.sql` — tabel `squads`.
+### `employees` — org data
+`id, name, initials, email, nip, pos_id, dept_id, div_id, squad_id, job_title_id, status, joined, org_role, reviewer_sl_id, reviewer_hod_id, reviewer_hodiv_id, deleted_at`
 
-Generate migrasi baru → edit `src/db/schema.ts` lalu `npm run db:generate`.
+- `org_role`: `staff | sl | hodept | hodiv | hr` — sumber role untuk JWT (dibaca saat login via email match ke `users`)
+- `reviewer_sl_id / reviewer_hod_id / reviewer_hodiv_id`: self-FK ke `employees.id` (nullable)
+- `initials`: disimpan di sini, dipakai saat appraisal dibuat
+- `nip`: format `EMP-YEAR-XXXX`, auto-generated di FE
+
+**Penting**: `users.id` dan `employees.id` adalah integer terpisah tapi di seed keduanya sama (1–13) karena diinsert berurutan. `appraisals.user_id` = `employees.id`. Lookup user dari appraisal: cari `users` yang `email`-nya sama dengan `employees.email`.
+
+### `divisions`
+`id, code, name, deleted_at`
+
+### `departments`
+`id, name, div_id → divisions.id, deleted_at`
+
+Tidak ada kolom `division` text — hanya FK.
+
+### `positions`
+`id, code, title, div_id → divisions.id, dept_id → departments.id, deleted_at`
+
+`div_id` di-backfill dari `departments.div_id` saat migrasi.
+
+### `squads`
+`id, code, name, division (text), div_id, department (text), dept_id, description, deleted_at`
+
+Masih ada kolom text `division` dan `department` — belum di-cleanup.
+
+### `kra_templates`
+`id, code, name, dept (text), dept_id, level, version, status, updated, used_by, summary`
+
+Masih ada kolom text `dept` — belum di-cleanup.
+
+### `appraisals`
+Menyimpan snapshot reviewer: `reviewer_sl_user_id`, `reviewer_sl_name`, `reviewer_sl_initials` (dan HoD, HoDiv versi yang sama). Snapshot ini diambil saat cycle didistribusikan, bukan live lookup.
+
+### Soft delete
+`divisions`, `departments`, `positions`, `employees`, `job_titles`, `squads` punya kolom `deleted_at`. Query harus filter `isNull(table.deletedAt)`.
+
+## Auth Flow
+
+1. `POST /auth/login` → cari `users` by email → verifikasi password → cari `employees` by email → ambil `orgRole` → buat JWT dengan `{ id, email, name, role }`
+2. Token di-attach tiap request sebagai `Authorization: Bearer <token>`
+3. `authMiddleware` verifikasi JWT → set `c.get('authUser')`
+4. `GET /auth/demo-users` → list semua user dengan role dari employees (untuk login picker di FE)
+
+## Migrasi
+
+Urutan migrasi (0000–0018). Untuk schema change:
+1. Edit `src/db/schema.ts`
+2. Tulis SQL migrasi manual di `drizzle/XXXX_nama.sql` (lebih cepat dari `db:generate` untuk perubahan kecil)
+3. `npm run db:migrate`
+
+**Catatan penting**: Saat menambah kolom NOT NULL ke tabel yang sudah ada data, tambahkan nullable dulu → backfill → set NOT NULL. Lihat `0017_positions_add_div_id.sql` sebagai contoh.
 
 ## Konvensi
 
 - **Naming response**: appraisal & audit pakai `snake_case` (kontrak FE lama). Sisa endpoint pakai `camelCase`.
 - **ID**: semua serial integer.
-- **Status code error**: lewat `fail(status, msg)` — jangan `throw new Error` mentah.
-- **Validasi input**: selalu Zod di handler `app.post/...`.
-- **Auth-protected route**: pasang `authMiddleware`, ambil user dengan `c.get('authUser')`.
-- **File uploads**: tulis ke `uploads/`, kembalikan URL `/uploads/<filename>`.
+- **Error**: `fail(status, msg)` — jangan `throw new Error` mentah.
+- **Validasi input**: Zod di handler. Tapi tidak semua endpoint sudah pakai Zod — beberapa masih `as Record<string, unknown>`.
+- **Auth-protected route**: `app.use('/path/*', authMiddleware)` di atas handler.
+- **Initials**: selalu hitung dengan `initialsOf(name)` dari `serializers.ts`. Jangan simpan di `users`.
+- **Role**: jangan hardcode di tempat selain `employees.orgRole`. Ambil dari sana.
 
 ## Alur khas request
 
-1. `app.ts` parse + validasi (Zod).
+1. `app.ts` parse + validasi.
 2. Domain rules dari `domain/appraisal.ts` (kalau status transition).
 3. DB I/O via `repositories.ts` → `db/client.ts`.
 4. Map ke shape FE via `serializers.ts`.
