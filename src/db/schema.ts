@@ -1,26 +1,18 @@
 import {
   integer,
-  jsonb,
   numeric,
   pgTable,
   serial,
   text,
   timestamp,
 } from 'drizzle-orm/pg-core';
+import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   name: text('name').notNull(),
-  initials: text('initials').notNull(),
-  role: text('role').notNull(),
-  dept: text('dept').notNull(),
-  deptId: integer('dept_id').notNull().default(0),
-  div: text('div'),
-  divId: integer('div_id').notNull().default(0),
-  squad: text('squad'),
-  position: text('position').notNull(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
@@ -29,32 +21,31 @@ export const divisions = pgTable('divisions', {
   id: serial('id').primaryKey(),
   code: text('code').notNull().default(''),
   name: text('name').notNull(),
-  head: text('head').notNull(),
-  headId: integer('head_id').notNull(),
-  headcount: integer('headcount').notNull().default(0),
-  departments: jsonb('departments').$type<string[]>().notNull().default([]),
+  deletedAt: timestamp('deleted_at'),
 });
 
 export const departments = pgTable('departments', {
   id: serial('id').primaryKey(),
   name: text('name').notNull(),
-  division: text('division').notNull(),
-  divId: integer('div_id').notNull(),
-  headId: integer('head_id').notNull(),
-  hod: text('hod').notNull(),
-  positions: integer('positions').notNull().default(0),
-  headcount: integer('headcount').notNull().default(0),
+  divId: integer('div_id')
+    .notNull()
+    .references(() => divisions.id, { onDelete: 'restrict' }),
+  deletedAt: timestamp('deleted_at'),
 });
 
 export const positions = pgTable('positions', {
   id: serial('id').primaryKey(),
   code: text('code').notNull(),
   title: text('title').notNull(),
-  level: text('level').notNull(),
-  dept: text('dept').notNull(),
-  deptId: integer('dept_id').notNull().default(0),
-  template: text('template').notNull(),
-  headcount: integer('headcount').notNull().default(0),
+  divId: integer('div_id')
+    .notNull()
+    .default(0)
+    .references(() => divisions.id, { onDelete: 'restrict' }),
+  deptId: integer('dept_id')
+    .notNull()
+    .default(0)
+    .references(() => departments.id, { onDelete: 'restrict' }),
+  deletedAt: timestamp('deleted_at'),
 });
 
 export const employees = pgTable('employees', {
@@ -63,21 +54,39 @@ export const employees = pgTable('employees', {
   initials: text('initials').notNull(),
   email: text('email').notNull().unique(),
   nip: text('nip').notNull(),
-  position: text('position').notNull(),
-  dept: text('dept').notNull(),
-  deptId: integer('dept_id').notNull().default(0),
-  div: text('div').notNull(),
-  divId: integer('div_id').notNull().default(0),
-  division: text('division').notNull(),
-  manager: text('manager').notNull(),
-  squad: text('squad'),
-  grade: text('grade').notNull(),
+  posId: integer('pos_id').references(() => positions.id, {
+    onDelete: 'set null',
+  }),
+  deptId: integer('dept_id')
+    .notNull()
+    .default(0)
+    .references(() => departments.id, { onDelete: 'restrict' }),
+  divId: integer('div_id')
+    .notNull()
+    .default(0)
+    .references(() => divisions.id, { onDelete: 'restrict' }),
+  squadId: integer('squad_id').references(() => squads.id, {
+    onDelete: 'set null',
+  }),
+  jobTitleId: integer('job_title_id').references(() => jobTitles.id, {
+    onDelete: 'set null',
+  }),
   status: text('status').notNull(),
   joined: text('joined').notNull(),
-  orgRole: text('org_role').notNull().default('staff'),
-  reviewerSl: text('reviewer_sl'),
-  reviewerHod: text('reviewer_hod'),
-  reviewerHodiv: text('reviewer_hodiv'),
+  orgRole: text('org_role').notNull().default('STAFF'),
+  reviewerSlId: integer('reviewer_sl_id').references(
+    (): AnyPgColumn => employees.id,
+    { onDelete: 'set null' }
+  ),
+  reviewerHodId: integer('reviewer_hod_id').references(
+    (): AnyPgColumn => employees.id,
+    { onDelete: 'set null' }
+  ),
+  reviewerHodivId: integer('reviewer_hodiv_id').references(
+    (): AnyPgColumn => employees.id,
+    { onDelete: 'set null' }
+  ),
+  deletedAt: timestamp('deleted_at'),
 });
 
 export const cycles = pgTable('cycles', {
@@ -100,7 +109,10 @@ export const kraTemplates = pgTable('kra_templates', {
   code: text('code').notNull().unique(),
   name: text('name').notNull(),
   dept: text('dept').notNull(),
-  deptId: integer('dept_id').notNull().default(0),
+  deptId: integer('dept_id')
+    .notNull()
+    .default(0)
+    .references(() => departments.id, { onDelete: 'restrict' }),
   level: text('level').notNull(),
   version: text('version').notNull(),
   status: text('status').notNull(),
@@ -196,13 +208,10 @@ export const auditEntries = pgTable('audit_entries', {
 
 export const jobTitles = pgTable('job_titles', {
   id: serial('id').primaryKey(),
-  code: text('code').notNull(),
+  code: text('code').notNull().default(''),
   name: text('name').notNull(),
-  level: text('level').notNull(),
-  department: text('department').notNull(),
-  deptId: integer('dept_id').notNull().default(0),
   description: text('description').notNull().default(''),
-  headcount: integer('headcount').notNull().default(0),
+  deletedAt: timestamp('deleted_at'),
 });
 
 export const squads = pgTable('squads', {
@@ -210,10 +219,17 @@ export const squads = pgTable('squads', {
   code: text('code').notNull().default(''),
   name: text('name').notNull(),
   division: text('division').notNull().default(''),
-  divId: integer('div_id').notNull().default(0),
+  divId: integer('div_id')
+    .notNull()
+    .default(0)
+    .references(() => divisions.id, { onDelete: 'restrict' }),
   department: text('department').notNull().default(''),
-  deptId: integer('dept_id').notNull().default(0),
+  deptId: integer('dept_id')
+    .notNull()
+    .default(0)
+    .references(() => departments.id, { onDelete: 'restrict' }),
   description: text('description').notNull().default(''),
+  deletedAt: timestamp('deleted_at'),
 });
 
 export type User = typeof users.$inferSelect;

@@ -11,12 +11,7 @@ export interface AuthUser {
   id: number;
   email: string;
   name: string;
-  initials: string;
   role: UserRole;
-  dept: string;
-  div?: string | null;
-  squad: string | null;
-  position: string;
 }
 
 export async function signToken(user: AuthUser) {
@@ -51,26 +46,14 @@ export const authMiddleware = createMiddleware<{
   }
 });
 
-export function toAuthUser(user: {
-  id: number;
-  email: string;
-  name: string;
-  initials: string;
-  role: string;
-  dept: string;
-  div: string | null;
-  squad: string | null;
-  position: string;
-}): AuthUser {
+export function toAuthUser(
+  user: { id: number; email: string; name: string },
+  role: string
+): AuthUser {
   return {
     id: user.id,
     email: user.email,
     name: user.name,
-    initials: user.initials,
-    role: user.role as UserRole,
-    dept: user.dept,
-    div: user.div,
-    squad: user.squad,
-    position: user.position,
+    role: role as UserRole,
   };
 }

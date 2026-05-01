@@ -3,7 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { serveStatic } from '@hono/node-server/serve-static';
 import bcrypt from 'bcryptjs';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, isNull } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { nanoid } from 'nanoid';
@@ -81,7 +81,13 @@ const loginSchema = z.object({
 
 app.get('/auth/demo-users', async (c) => {
   const rows = await db.select().from(users);
-  return c.json(rows.map(toAuthUser));
+  const empRows = await db.select().from(employees);
+  return c.json(
+    rows.map((u) => {
+      const emp = empRows.find((e) => e.email === u.email);
+      return toAuthUser(u, emp?.orgRole ?? 'staff');
+    })
+  );
 });
 
 app.post('/auth/login', async (c) => {
@@ -93,8 +99,31 @@ app.post('/auth/login', async (c) => {
   if (!user) fail(401, 'Invalid email or password');
   const ok = await bcrypt.compare(body.password, user.passwordHash);
   if (!ok) fail(401, 'Invalid email or password');
-  const authUser = toAuthUser(user);
+  const [emp] = await db
+    .select()
+    .from(employees)
+    .where(eq(employees.email, body.email));
+  const authUser = toAuthUser(user, emp?.orgRole ?? 'staff');
   return c.json({ token: await signToken(authUser), user: authUser });
+});
+
+app.post('/auth/change-password', authMiddleware, async (c) => {
+  const authUser = c.get('authUser');
+  const body = (await c.req.json()) as Record<string, unknown>;
+  const current = String(body.currentPassword ?? '');
+  const next = String(body.newPassword ?? '');
+  if (!next || next.length < 6)
+    fail(400, 'New password must be at least 6 characters');
+  const [user] = await db.select().from(users).where(eq(users.id, authUser.id));
+  if (!user) fail(404, 'User not found');
+  const ok = await bcrypt.compare(current, user.passwordHash);
+  if (!ok) fail(401, 'Current password is incorrect');
+  const newHash = await bcrypt.hash(next, 10);
+  await db
+    .update(users)
+    .set({ passwordHash: newHash, updatedAt: new Date() })
+    .where(eq(users.id, authUser.id));
+  return c.json({ ok: true });
 });
 
 app.post('/auth/logout', (c) => c.json({ ok: true }));
@@ -294,9 +323,16 @@ function crud(
   defaults: (
     body: Record<string, unknown>,
     id?: number
-  ) => Record<string, unknown>
+  ) => Record<string, unknown>,
+  softDelete = false
 ) {
-  app.get(base, async (c) => c.json(await db.select().from(table)));
+  app.get(base, async (c) => {
+    const query = db.select().from(table);
+    const rows = softDelete
+      ? await query.where(isNull(table.deletedAt))
+      : await query;
+    return c.json(rows);
+  });
   app.post(base, async (c) => {
     const body = (await c.req.json()) as Record<string, unknown>;
     const row = defaults(body);
@@ -314,87 +350,131 @@ function crud(
     return c.json(updated);
   });
   app.delete(`${base}/:id`, async (c) => {
-    await db.delete(table).where(eq(table.id, numberParam(c.req.param('id'))));
+    const id = numberParam(c.req.param('id'));
+    if (softDelete) {
+      await db
+        .update(table)
+        .set({ deletedAt: new Date() })
+        .where(eq(table.id, id));
+    } else {
+      await db.delete(table).where(eq(table.id, id));
+    }
     return c.json({ ok: true });
   });
 }
 
-crud('/org/divisions', divisions, (body, id) => ({
-  ...(id ? { id } : {}),
-  code: String(body.code ?? ''),
-  name: String(body.name ?? ''),
-  head: String(body.head ?? ''),
-  headId: Number(body.headId ?? 0),
-  headcount: Number(body.headcount ?? 0),
-  departments: Array.isArray(body.departments) ? body.departments : [],
-}));
+crud(
+  '/org/divisions',
+  divisions,
+  (body, id) => ({
+    ...(id ? { id } : {}),
+    code: String(body.code ?? ''),
+    name: String(body.name ?? ''),
+  }),
+  true
+);
 
-crud('/org/departments', departments, (body, id) => ({
-  ...(id ? { id } : {}),
-  name: String(body.name ?? ''),
-  division: String(body.division ?? ''),
-  divId: Number(body.divId ?? 0),
-  headId: Number(body.headId ?? 0),
-  hod: String(body.hod ?? ''),
-  positions: Number(body.positions ?? 0),
-  headcount: Number(body.headcount ?? 0),
-}));
+crud(
+  '/org/departments',
+  departments,
+  (body, id) => ({
+    ...(id ? { id } : {}),
+    name: String(body.name ?? ''),
+    divId: Number(body.divId ?? 0),
+  }),
+  true
+);
 
-crud('/org/positions', positions, (body, id) => ({
-  ...(id ? { id } : {}),
-  code: String(body.code ?? ''),
-  title: String(body.title ?? ''),
-  level: String(body.level ?? ''),
-  dept: String(body.dept ?? ''),
-  deptId: Number(body.deptId ?? 0),
-  template: String(body.template ?? ''),
-  headcount: Number(body.headcount ?? 0),
-}));
+crud(
+  '/org/positions',
+  positions,
+  (body, id) => ({
+    ...(id ? { id } : {}),
+    code: String(body.code ?? ''),
+    title: String(body.title ?? ''),
+    divId: Number(body.divId ?? 0),
+    deptId: Number(body.deptId ?? 0),
+  }),
+  true
+);
 
-crud('/org/employees', employees, (body, id) => ({
-  ...(id ? { id } : {}),
-  name: String(body.name ?? ''),
-  initials: String(body.initials ?? initialsOf(String(body.name ?? ''))),
-  email: String(body.email ?? ''),
-  nip: String(body.nip ?? ''),
-  position: String(body.position ?? ''),
-  dept: String(body.dept ?? ''),
-  deptId: Number(body.deptId ?? 0),
-  div: String(body.div ?? body.division ?? ''),
-  divId: Number(body.divId ?? 0),
-  division: String(body.division ?? body.div ?? ''),
-  manager: String(body.manager ?? ''),
-  squad: body.squad == null ? null : String(body.squad),
-  grade: String(body.grade ?? ''),
-  status: String(body.status ?? 'active'),
-  joined: String(body.joined ?? ''),
-  orgRole: String(body.orgRole ?? 'staff'),
-  reviewerSl: body.reviewerSl == null ? null : String(body.reviewerSl),
-  reviewerHod: body.reviewerHod == null ? null : String(body.reviewerHod),
-  reviewerHodiv: body.reviewerHodiv == null ? null : String(body.reviewerHodiv),
-}));
+app.get('/org/employees', authMiddleware, async (c) => {
+  const rows = await db
+    .select()
+    .from(employees)
+    .where(isNull(employees.deletedAt));
+  const posRows = await db.select().from(positions);
+  return c.json(
+    rows.map((e) => ({
+      ...e,
+      position: posRows.find((p) => p.id === e.posId)?.title ?? '',
+    }))
+  );
+});
 
-crud('/org/job-titles', jobTitles, (body, id) => ({
-  ...(id ? { id } : {}),
-  code: String(body.code ?? ''),
-  name: String(body.name ?? ''),
-  level: String(body.level ?? ''),
-  department: String(body.department ?? ''),
-  deptId: Number(body.deptId ?? 0),
-  description: String(body.description ?? ''),
-  headcount: Number(body.headcount ?? 0),
-}));
+crud(
+  '/org/employees',
+  employees,
+  (body, id) => ({
+    ...(id ? { id } : {}),
+    name: String(body.name ?? ''),
+    initials: String(body.initials ?? initialsOf(String(body.name ?? ''))),
+    email: String(body.email ?? ''),
+    nip: String(body.nip ?? ''),
+    posId:
+      body.posId == null || body.posId === ''
+        ? null
+        : Number(body.posId) || null,
+    deptId: Number(body.deptId ?? 0),
+    divId: Number(body.divId ?? 0),
+    squadId:
+      body.squadId == null || body.squadId === ''
+        ? null
+        : Number(body.squadId) || null,
+    jobTitleId:
+      body.jobTitleId == null || body.jobTitleId === ''
+        ? null
+        : Number(body.jobTitleId) || null,
+    status: String(body.status ?? 'active'),
+    joined: String(body.joined ?? ''),
+    orgRole: String(body.orgRole ?? 'STAFF'),
+    reviewerSlId:
+      body.reviewerSlId == null ? null : Number(body.reviewerSlId) || null,
+    reviewerHodId:
+      body.reviewerHodId == null ? null : Number(body.reviewerHodId) || null,
+    reviewerHodivId:
+      body.reviewerHodivId == null
+        ? null
+        : Number(body.reviewerHodivId) || null,
+  }),
+  true
+);
 
-crud('/org/squads', squads, (body, id) => ({
-  ...(id ? { id } : {}),
-  code: String(body.code ?? ''),
-  name: String(body.name ?? ''),
-  division: String(body.division ?? ''),
-  divId: Number(body.divId ?? 0),
-  department: String(body.department ?? ''),
-  deptId: Number(body.deptId ?? 0),
-  description: String(body.description ?? ''),
-}));
+crud(
+  '/org/job-titles',
+  jobTitles,
+  (body, id) => ({
+    ...(id ? { id } : {}),
+    code: String(body.code ?? ''),
+    name: String(body.name ?? ''),
+    description: String(body.description ?? ''),
+  }),
+  true
+);
+
+crud(
+  '/org/squads',
+  squads,
+  (body, id) => ({
+    ...(id ? { id } : {}),
+    code: String(body.code ?? ''),
+    name: String(body.name ?? ''),
+    divId: Number(body.divId ?? 0),
+    deptId: Number(body.deptId ?? 0),
+    description: String(body.description ?? ''),
+  }),
+  true
+);
 
 crud('/cycles', cycles, (body, id) => ({
   ...(id ? { id } : {}),
@@ -425,34 +505,31 @@ async function distributionRows(cycleId: number) {
     .where(eq(appraisals.cycleName, cycle.name));
   const userRows = await db.select().from(users);
   const divisionRows = await db.select().from(divisions);
-  const departmentRows = await db.select().from(departments);
+  const positionRows = await db.select().from(positions);
 
   return employeeRows.map((employee) => {
     const already = appraisalRows.some(
       (appraisal) => appraisal.userId === employee.id
     );
+    const posTitle =
+      positionRows.find((p) => p.id === employee.posId)?.title ?? '';
     const template =
       templateRows.find(
         (item) =>
           item.deptId === employee.deptId &&
-          employee.position.toLowerCase().includes(item.name.toLowerCase())
+          posTitle.toLowerCase().includes(item.name.toLowerCase())
       ) ?? null;
-    const sl =
-      userRows.find(
-        (user) => user.name === employee.manager && user.role === 'sl'
-      ) ?? null;
-    const department = departmentRows.find(
-      (item) => item.id === employee.deptId
-    );
-    const hod = department
-      ? (userRows.find((user) => user.id === department.headId) ?? null)
+    const sl = employee.reviewerSlId
+      ? (userRows.find((user) => user.id === employee.reviewerSlId) ?? null)
       : null;
-    const division = divisionRows.find(
-      (item) => item.id === employee.divId
-    );
-    const hodiv = division
-      ? (userRows.find((user) => user.id === division.headId) ?? null)
+    const hod = employee.reviewerHodId
+      ? (userRows.find((user) => user.id === employee.reviewerHodId) ?? null)
       : null;
+    const hodiv = employee.reviewerHodivId
+      ? (userRows.find((user) => user.id === employee.reviewerHodivId) ?? null)
+      : null;
+    const division = divisionRows.find((item) => item.id === employee.divId);
+    const divisionName = division?.name ?? 'Unknown';
 
     if (already)
       return {
@@ -466,7 +543,7 @@ async function distributionRows(cycleId: number) {
         employee,
         status: 'skipped_no_template',
         template: null,
-        reason: `Belum ada template untuk ${employee.division} · ${employee.position}`,
+        reason: `Belum ada template untuk ${divisionName} · ${posTitle}`,
       };
     if (!hod || !hodiv)
       return {
@@ -528,13 +605,13 @@ app.post('/cycles/:id/distribute', async (c) => {
         reflection: '',
         reviewerSlUserId: sl?.id ?? hod.id,
         reviewerSlName: sl?.name ?? hod.name,
-        reviewerSlInitials: sl?.initials ?? hod.initials,
+        reviewerSlInitials: initialsOf(sl?.name ?? hod.name),
         reviewerHodUserId: hod.id,
         reviewerHodName: hod.name,
-        reviewerHodInitials: hod.initials,
+        reviewerHodInitials: initialsOf(hod.name),
         reviewerHodivUserId: hodiv.id,
         reviewerHodivName: hodiv.name,
-        reviewerHodivInitials: hodiv.initials,
+        reviewerHodivInitials: initialsOf(hodiv.name),
       })
       .returning();
     if (templateItems.length) {
@@ -606,6 +683,9 @@ async function buildCompletedReport(cycleId: number) {
       )
     );
   const employeeRows = await db.select().from(employees);
+  const divisionRows = await db.select().from(divisions);
+  const departmentRows = await db.select().from(departments);
+  const positionRows = await db.select().from(positions);
 
   return completed
     .map((row) => {
@@ -622,6 +702,12 @@ async function buildCompletedReport(cycleId: number) {
       const employee = user
         ? employeeRows.find((item) => item.email === user.email)
         : undefined;
+      const division = employee
+        ? divisionRows.find((item) => item.id === employee.divId)
+        : undefined;
+      const department = employee
+        ? departmentRows.find((item) => item.id === employee.deptId)
+        : undefined;
       const calibratedScore =
         row.calibratedScore == null ? null : Number(row.calibratedScore);
       return {
@@ -629,9 +715,10 @@ async function buildCompletedReport(cycleId: number) {
         cycleId,
         employee: user?.name ?? `User #${row.userId}`,
         nip: employee?.nip ?? '',
-        dept: user?.dept ?? employee?.dept ?? '',
-        division: user?.div ?? employee?.division ?? '',
-        position: user?.position ?? employee?.position ?? '',
+        dept: department?.name ?? '',
+        division: division?.name ?? '',
+        position:
+          positionRows.find((p) => p.id === employee?.posId)?.title ?? '',
         finalScore,
         calibratedScore,
         finalGrade: row.finalGrade ?? null,
@@ -739,6 +826,10 @@ app.get('/dashboard/hr', async (c) => {
     .from(appraisals)
     .where(eq(appraisals.cycleName, cycle.name));
   const userRows = await db.select().from(users);
+  const employeeRows = await db.select().from(employees);
+  const divisionRows = await db.select().from(divisions);
+  const employeeMap = new Map(employeeRows.map((e) => [e.id, e]));
+  const divisionMap = new Map(divisionRows.map((d) => [d.id, d]));
   const kraRows = appraisalRows.length
     ? await db
         .select()
@@ -798,13 +889,16 @@ app.get('/dashboard/hr', async (c) => {
   const divisionGroups = new Map<string, typeof appraisalRows>();
   for (const row of appraisalRows) {
     const user = userMap.get(row.userId);
-    const divName = user?.div ?? user?.dept ?? 'Unassigned';
+    const emp = employeeMap.get(row.userId);
+    const divName = emp
+      ? (divisionMap.get(emp.divId)?.name ?? 'Unassigned')
+      : 'Unassigned';
     const list = divisionGroups.get(divName) ?? [];
     list.push(row);
     divisionGroups.set(divName, list);
   }
 
-  const divisions = Array.from(divisionGroups.entries())
+  const divisionStats = Array.from(divisionGroups.entries())
     .map(([name, rows]) => {
       const completedRows = rows.filter((row) => row.status === 'completed');
       const inReviewRows = rows.filter((row) =>
@@ -887,11 +981,13 @@ app.get('/dashboard/hr', async (c) => {
       return {
         who: owner?.name ?? `User #${appraisal?.userId ?? '?'}`,
         team: owner
-          ? `${owner.div ?? owner.dept}${owner.dept && owner.div ? ` · ${owner.dept}` : ''}`
+          ? (divisionMap.get(
+              employeeMap.get(appraisal?.userId ?? 0)?.divId ?? 0
+            )?.name ?? '')
           : '',
         to: stageLabel[entry.toStatus ?? ''] ?? entry.toStatus ?? entry.action,
         when: relTime(entry.timestamp),
-        initials: owner?.initials ?? '??',
+        initials: initialsOf(owner?.name ?? ''),
       };
     });
 
@@ -944,7 +1040,7 @@ app.get('/dashboard/hr', async (c) => {
       selfDeadline: cycle.selfDeadline,
     },
     pipeline,
-    divisions,
+    divisions: divisionStats,
     scoreBuckets,
     recentSubmissions,
     attention,
@@ -1059,7 +1155,7 @@ app.get('/dashboard/me/activity', async (c) => {
         (row) => row.id === entry.appraisalId
       );
       return {
-        avatar: actorUser?.initials ?? '??',
+        avatar: initialsOf(actorUser?.name ?? ''),
         who: isOwner
           ? 'You'
           : (actorUser?.name ?? `User #${entry.actorUserId}`),
