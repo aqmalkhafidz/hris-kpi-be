@@ -39,11 +39,42 @@ const cycleSchema = z.object({
   draft: z.number().int().nonnegative().default(0),
 });
 
+function templateKey(template: typeof kraTemplates.$inferSelect) {
+  return `${template.divId}:${template.deptId}:${template.posId}`;
+}
+
+function versionRank(version: string) {
+  const match = version.match(/\d+(\.\d+)?/);
+  return match ? Number(match[0]) : 0;
+}
+
+function chooseReusableTemplates(
+  rows: Array<typeof kraTemplates.$inferSelect>
+) {
+  const map = new Map<string, typeof kraTemplates.$inferSelect>();
+  for (const row of rows) {
+    if (row.status !== 'published') continue;
+    const key = templateKey(row);
+    const current = map.get(key);
+    if (!current) {
+      map.set(key, row);
+      continue;
+    }
+    const currentRank = versionRank(current.version);
+    const nextRank = versionRank(row.version);
+    if (nextRank > currentRank || (nextRank === currentRank && row.id > current.id)) {
+      map.set(key, row);
+    }
+  }
+  return map;
+}
+
 async function distributionRows(cycleId: number) {
   const [cycle] = await db.select().from(cycles).where(eq(cycles.id, cycleId));
   if (!cycle) fail(404, 'Cycle not found');
   const employeeRows = await db.select().from(employees);
   const templateRows = await db.select().from(kraTemplates);
+  const reusableTemplateMap = chooseReusableTemplates(templateRows);
   const appraisalRows = await db
     .select()
     .from(appraisals)
@@ -60,11 +91,8 @@ async function distributionRows(cycleId: number) {
     const posTitle =
       positionRows.find((p) => p.id === employee.posId)?.title ?? '';
     const template =
-      templateRows.find(
-        (item) =>
-          item.divId === employee.divId &&
-          item.deptId === employee.deptId &&
-          item.posId === employee.posId
+      reusableTemplateMap.get(
+        `${employee.divId}:${employee.deptId}:${employee.posId}`
       ) ?? null;
     const slEmp = employee.reviewerSlId
       ? employeeRows.find((e) => e.id === employee.reviewerSlId)
@@ -240,6 +268,8 @@ export function registerCycleRoutes(app: AppHono) {
             userId: employee.id,
             cycleName: cycle.name,
             cycleShort: cycle.name.replace(' Appraisal', ''),
+            templateId: template.id,
+            templateVersion: template.version,
             status: 'draft',
             reflection: '',
             reviewerSlUserId: sl?.id ?? hod.id,

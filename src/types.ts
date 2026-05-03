@@ -5,9 +5,8 @@ export type AppraisalStatus =
   | 'sl_review'
   | 'hod_review'
   | 'hodiv_review'
-  | 'acknowledge'
   | 'completed';
-export type AuditAction = 'submit' | 'approve' | 'return' | 'acknowledge';
+export type AuditAction = 'submit' | 'approve' | 'return';
 
 export interface ActorInfo {
   userId: number;

@@ -15,7 +15,7 @@ const kraTemplateSchema = z.object({
   deptId: z.number().int().nonnegative(),
   posId: z.number().int().nonnegative(),
   version: z.string().max(40).default('v1'),
-  status: z.enum(['draft', 'active', 'archived']).default('draft'),
+  status: z.enum(['draft', 'published', 'archived']).default('draft'),
   updated: z.string().max(40).optional(),
   usedBy: z.number().int().nonnegative().default(0),
   summary: z.string().max(2000).default(''),

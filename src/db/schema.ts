@@ -13,6 +13,9 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   name: text('name').notNull(),
+  employeeId: integer('employee_id').references((): AnyPgColumn => employees.id, {
+    onDelete: 'set null',
+  }),
   avatarUrl: text('avatar_url'),
   phone: text('phone'),
   emergencyName: text('emergency_name'),
@@ -148,6 +151,10 @@ export const appraisals = pgTable('appraisals', {
   userId: integer('user_id').notNull(),
   cycleName: text('cycle_name').notNull(),
   cycleShort: text('cycle_short').notNull(),
+  templateId: integer('template_id').references(() => kraTemplates.id, {
+    onDelete: 'set null',
+  }),
+  templateVersion: text('template_version'),
   status: text('status').notNull(),
   reflection: text('reflection').notNull(),
   reviewerSlUserId: integer('reviewer_sl_user_id').notNull(),

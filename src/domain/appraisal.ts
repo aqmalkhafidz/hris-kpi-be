@@ -5,7 +5,6 @@ const forwardOrder: AppraisalStatus[] = [
   'sl_review',
   'hod_review',
   'hodiv_review',
-  'acknowledge',
   'completed',
 ];
 

@@ -10,11 +10,17 @@ export function serializeAppraisal(
   row: AppraisalRow,
   kras: Array<KraRow & { evidence: EvidenceRow[] }>,
   auditLog: AuditEntryRow[],
-  cycle: CycleRow | null = null
+  cycle: CycleRow | null = null,
+  owner: { userId: number; name: string; initials: string } | null = null
 ) {
   return {
     id: row.id,
     userId: row.userId,
+    owner: owner ?? {
+      userId: row.userId,
+      name: `Employee #${row.userId}`,
+      initials: initialsOf(`Employee ${row.userId}`),
+    },
     cycleName: row.cycleName,
     cycleShort: row.cycleShort,
     cycleStartDate: cycle?.startDate ?? null,

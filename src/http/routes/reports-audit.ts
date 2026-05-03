@@ -63,7 +63,9 @@ export async function buildCompletedReport(cycleId: number) {
       const finalScore = Number((weighted / totalWeight).toFixed(2));
       const user = userRows.find((item) => item.id === row.userId);
       const employee = user
-        ? employeeRows.find((item) => item.email === user.email)
+        ? (user.employeeId
+            ? employeeRows.find((item) => item.id === user.employeeId)
+            : undefined) ?? employeeRows.find((item) => item.email === user.email)
         : undefined;
       const division = employee
         ? divisionRows.find((item) => item.id === employee.divId)

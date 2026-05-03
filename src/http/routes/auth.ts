@@ -55,7 +55,10 @@ export function registerAuthRoutes(app: AppHono, uploadRoot: string) {
     const empRows = await db.select().from(employees);
     return c.json(
       rows.map((u) => {
-        const emp = empRows.find((e) => e.email === u.email);
+        const emp =
+          (u.employeeId
+            ? empRows.find((e) => e.id === u.employeeId)
+            : undefined) ?? empRows.find((e) => e.email === u.email);
         return toAuthUser(u, emp?.orgRole ?? 'staff');
       })
     );
@@ -79,10 +82,15 @@ export function registerAuthRoutes(app: AppHono, uploadRoot: string) {
       fail(401, 'Invalid email or password');
     }
     clearLoginFailures(rateKey);
-    const [emp] = await db
-      .select()
-      .from(employees)
-      .where(eq(employees.email, body.email));
+    const [emp] = user.employeeId
+      ? await db
+          .select()
+          .from(employees)
+          .where(eq(employees.id, user.employeeId))
+      : await db
+          .select()
+          .from(employees)
+          .where(eq(employees.email, body.email));
     const authUser = toAuthUser(user, emp?.orgRole ?? 'staff');
     setAuthCookie(c, await signToken(authUser, user.tokenVersion));
     return c.json({
@@ -175,10 +183,15 @@ export function registerAuthRoutes(app: AppHono, uploadRoot: string) {
       .select()
       .from(users)
       .where(eq(users.id, auth.id));
-    const [emp] = await db
-      .select()
-      .from(employees)
-      .where(eq(employees.email, auth.email));
+    const [emp] = userRow?.employeeId
+      ? await db
+          .select()
+          .from(employees)
+          .where(eq(employees.id, userRow.employeeId))
+      : await db
+          .select()
+          .from(employees)
+          .where(eq(employees.email, auth.email));
     let dept: string | null = null;
     let div: string | null = null;
     let squad: string | null = null;

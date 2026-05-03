@@ -41,6 +41,7 @@ const evidencePatchSchema = z.object({
 });
 
 const kraPatchSchema = z.object({
+  id: z.number().int().positive().optional(),
   title: z.string().min(1).max(500),
   description: z.string().max(4000),
   target: z.string().max(4000),
@@ -104,12 +105,12 @@ export function registerAppraisalRoutes(app: AppHono) {
     const rows = scopeFilter
       ? await baseQuery.where(scopeFilter)
       : await baseQuery;
-    const completed = rows
-      .filter((row) => row.status === 'completed')
-      .sort((a, b) =>
-        (b.acknowledgedAt ?? '').localeCompare(a.acknowledgedAt ?? '')
-      );
-    const items = await serializeAppraisalRows(completed);
+    const sorted = rows.sort((a, b) => {
+      const aTime = a.acknowledgedAt ?? a.submittedAt ?? a.id.toString();
+      const bTime = b.acknowledgedAt ?? b.submittedAt ?? b.id.toString();
+      return bTime.localeCompare(aTime);
+    });
+    const items = await serializeAppraisalRows(sorted);
     const userRows = await db.select().from(users);
     const empRows = await db.select().from(employees);
     const userMap = new Map(userRows.map((u) => [u.id, u]));
@@ -120,7 +121,7 @@ export function registerAppraisalRoutes(app: AppHono) {
       number,
       { id: number; name: string; initials: string; position?: string }
     > = {};
-    for (const row of completed) {
+    for (const row of sorted) {
       if (ownerLookup[row.userId]) continue;
       const u = userMap.get(row.userId);
       const emp = empMap.get(row.userId);
@@ -205,6 +206,7 @@ export function registerAppraisalRoutes(app: AppHono) {
       .set({
         status: toStatus,
         submittedAt: status === 'draft' ? now : current.submittedAt,
+        acknowledgedAt: toStatus === 'completed' ? now : current.acknowledgedAt,
         updatedAt: new Date(),
       })
       .where(eq(appraisals.id, current.id));
@@ -248,34 +250,6 @@ export function registerAppraisalRoutes(app: AppHono) {
       fromStatus,
       toStatus: target,
       reason: body.reason,
-    });
-    return c.json(await loadAppraisal(current.id));
-  });
-
-  app.post('/appraisals/:id/acknowledge', async (c) => {
-    const actor = c.get('authUser');
-    const current = await requireAppraisal(numberParam(c.req.param('id')));
-    if (current.status !== 'acknowledge') fail(400, 'Not pending acknowledge');
-    if (actor.id !== current.userId)
-      fail(403, 'Only appraisal owner can acknowledge');
-    const now = new Date().toISOString();
-    await db
-      .update(appraisals)
-      .set({
-        status: 'completed',
-        acknowledgedAt: now,
-        updatedAt: new Date(),
-      })
-      .where(eq(appraisals.id, current.id));
-    await db.insert(auditEntries).values({
-      appraisalId: current.id,
-      timestamp: now,
-      actorUserId: actor.id,
-      actorName: actor.name,
-      actorRole: actor.role,
-      action: 'acknowledge',
-      fromStatus: 'acknowledge',
-      toStatus: 'completed',
     });
     return c.json(await loadAppraisal(current.id));
   });

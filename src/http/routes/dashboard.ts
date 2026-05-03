@@ -98,15 +98,13 @@ export function registerDashboardRoutes(app: AppHono) {
     const isPastSelfDraft = (row: typeof appraisals.$inferSelect) =>
       row.status !== 'draft';
     const slApproved = appraisalRows.filter((row) =>
-      ['hod_review', 'hodiv_review', 'acknowledge', 'completed'].includes(
-        row.status
-      )
+      ['hod_review', 'hodiv_review', 'completed'].includes(row.status)
     );
     const hodApproved = appraisalRows.filter((row) =>
-      ['hodiv_review', 'acknowledge', 'completed'].includes(row.status)
+      ['hodiv_review', 'completed'].includes(row.status)
     );
-    const hodivApproved = appraisalRows.filter((row) =>
-      ['acknowledge', 'completed'].includes(row.status)
+    const hodivApproved = appraisalRows.filter(
+      (row) => row.status === 'completed'
     );
     const completed = appraisalRows.filter((row) => row.status === 'completed');
     const draftStarted = appraisalRows.filter((row) => {
@@ -143,9 +141,7 @@ export function registerDashboardRoutes(app: AppHono) {
       .map(([name, rows]) => {
         const completedRows = rows.filter((row) => row.status === 'completed');
         const inReviewRows = rows.filter((row) =>
-          ['sl_review', 'hod_review', 'hodiv_review', 'acknowledge'].includes(
-            row.status
-          )
+          ['sl_review', 'hod_review', 'hodiv_review'].includes(row.status)
         );
         const draftRows = rows.filter(
           (row) =>
@@ -208,9 +204,7 @@ export function registerDashboardRoutes(app: AppHono) {
     }
 
     const recentSubmissions = [...auditRows]
-      .filter((entry) =>
-        ['submit', 'approve', 'acknowledge'].includes(entry.action)
-      )
+      .filter((entry) => ['submit', 'approve'].includes(entry.action))
       .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
       .slice(0, 6)
       .map((entry) => {
@@ -222,7 +216,6 @@ export function registerDashboardRoutes(app: AppHono) {
           sl_review: 'Squad Leader review',
           hod_review: 'HoD review',
           hodiv_review: 'HoDiv review',
-          acknowledge: 'Acknowledge',
           completed: 'Completed',
         };
         return {
@@ -411,13 +404,11 @@ export function registerDashboardRoutes(app: AppHono) {
       submit: 'brand',
       approve: 'success',
       return: 'warning',
-      acknowledge: 'success',
     };
     const verbMap: Record<string, string> = {
       submit: 'submitted',
       approve: 'approved',
       return: 'returned',
-      acknowledge: 'acknowledged',
     };
     return c.json(
       sorted.map((entry) => {
