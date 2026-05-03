@@ -1,12 +1,19 @@
 import { eq } from 'drizzle-orm';
+import type { Context } from 'hono';
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { createMiddleware } from 'hono/factory';
 import { errors as joseErrors, SignJWT, jwtVerify } from 'jose';
+import { nanoid } from 'nanoid';
 import { IS_PROD, JWT_EXPIRY } from '../config.js';
 import { db } from '../db/client.js';
 import { users } from '../db/schema.js';
 import { log } from '../log.js';
 import type { UserRole } from '../types.js';
 import { fail } from './error.js';
+
+const AUTH_COOKIE_NAME = 'hris_auth';
+const CSRF_COOKIE_NAME = 'hris_csrf';
+export const CSRF_HEADER_NAME = 'X-CSRF-Token';
 
 const rawSecret = process.env.JWT_SECRET;
 if (!rawSecret || rawSecret.length < 32) {
@@ -29,6 +36,20 @@ const secret = new TextEncoder().encode(
   rawSecret ?? 'dev-secret-change-me-32-chars-min'
 );
 
+const authCookieOptions = {
+  httpOnly: true,
+  secure: IS_PROD,
+  sameSite: IS_PROD ? ('None' as const) : ('Lax' as const),
+  path: '/',
+};
+
+const csrfCookieOptions = {
+  httpOnly: false,
+  secure: IS_PROD,
+  sameSite: IS_PROD ? ('None' as const) : ('Lax' as const),
+  path: '/',
+};
+
 export interface AuthUser {
   id: number;
   email: string;
@@ -50,6 +71,36 @@ export async function signToken(user: AuthUser, tokenVersion: number) {
     .sign(secret);
 }
 
+export function setAuthCookie(c: Context, token: string) {
+  setCookie(c, AUTH_COOKIE_NAME, token, authCookieOptions);
+}
+
+export function clearAuthCookies(c: Context) {
+  deleteCookie(c, AUTH_COOKIE_NAME, { path: '/' });
+  deleteCookie(c, CSRF_COOKIE_NAME, { path: '/' });
+}
+
+export function issueCsrfToken(c: Context) {
+  const token = nanoid(32);
+  setCookie(c, CSRF_COOKIE_NAME, token, csrfCookieOptions);
+  return token;
+}
+
+export const csrfMiddleware = createMiddleware(async (c, next) => {
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(c.req.method)) {
+    await next();
+    return;
+  }
+
+  const cookieToken = getCookie(c, CSRF_COOKIE_NAME);
+  const headerToken = c.req.header(CSRF_HEADER_NAME);
+  if (!cookieToken || !headerToken || cookieToken !== headerToken) {
+    fail(403, 'Invalid CSRF token');
+  }
+
+  await next();
+});
+
 export async function verifyToken(
   token: string
 ): Promise<{ user: AuthUser; tv: number }> {
@@ -65,8 +116,8 @@ export const authMiddleware = createMiddleware<{
   const header = c.req.header('Authorization');
   const token = header?.startsWith('Bearer ')
     ? header.slice('Bearer '.length)
-    : null;
-  if (!token) fail(401, 'Missing bearer token');
+    : getCookie(c, AUTH_COOKIE_NAME);
+  if (!token) fail(401, 'Missing auth token');
   let claims: { user: AuthUser; tv: number };
   try {
     claims = await verifyToken(token);

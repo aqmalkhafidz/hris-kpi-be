@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import { CORS_MAX_AGE, IS_PROD } from './config.js';
+import { csrfMiddleware, CSRF_HEADER_NAME } from './http/auth.js';
 import type { AppEnv } from './http/env.js';
 import { jsonError } from './http/error.js';
 import { registerAppraisalRoutes } from './http/routes/appraisals.js';
@@ -30,7 +31,8 @@ app.use(
       baseUri: ["'self'"],
       frameAncestors: ["'none'"],
       objectSrc: ["'none'"],
-      imgSrc: ["'self'", 'data:'],
+      imgSrc: ["'self'", 'data:', 'blob:'],
+      frameSrc: ["'self'", 'blob:'],
     },
     referrerPolicy: 'no-referrer',
     crossOriginResourcePolicy: 'same-site',
@@ -45,11 +47,14 @@ app.use(
   '*',
   cors({
     origin: process.env.CORS_ORIGIN?.split(',') ?? ['http://localhost:5173'],
-    allowHeaders: ['Content-Type', 'Authorization'],
+    allowHeaders: ['Content-Type', 'Authorization', CSRF_HEADER_NAME],
     allowMethods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    credentials: true,
     maxAge: CORS_MAX_AGE,
   })
 );
+
+app.use('*', csrfMiddleware);
 
 app.get('/health', (c) => c.json({ ok: true }));
 

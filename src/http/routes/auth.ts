@@ -23,7 +23,14 @@ import {
 } from '../../util/login-rate.js';
 import { validatePassword } from '../../util/password.js';
 import { AVATAR_MIME_EXT, sniffSignature } from '../../util/upload.js';
-import { authMiddleware, signToken, toAuthUser } from '../auth.js';
+import {
+  authMiddleware,
+  clearAuthCookies,
+  issueCsrfToken,
+  setAuthCookie,
+  signToken,
+  toAuthUser,
+} from '../auth.js';
 import type { AppHono } from '../env.js';
 import { fail } from '../error.js';
 
@@ -38,6 +45,8 @@ const changePasswordSchema = z.object({
 });
 
 export function registerAuthRoutes(app: AppHono, uploadRoot: string) {
+  app.get('/auth/csrf', (c) => c.json({ csrfToken: issueCsrfToken(c) }));
+
   app.get('/auth/demo-users', async (c) => {
     // Demo-only login picker. Disabled in production to avoid leaking the
     // employee roster (emails + roles) to unauthenticated callers.
@@ -75,8 +84,8 @@ export function registerAuthRoutes(app: AppHono, uploadRoot: string) {
       .from(employees)
       .where(eq(employees.email, body.email));
     const authUser = toAuthUser(user, emp?.orgRole ?? 'staff');
+    setAuthCookie(c, await signToken(authUser, user.tokenVersion));
     return c.json({
-      token: await signToken(authUser, user.tokenVersion),
       user: authUser,
     });
   });
@@ -155,9 +164,10 @@ export function registerAuthRoutes(app: AppHono, uploadRoot: string) {
     return c.json({ ok: true });
   });
 
-  // Client-side logout: client drops the token. Server has no per-token
-  // blacklist; to force-revoke use POST /auth/change-password (bumps tokenVersion).
-  app.post('/auth/logout', (c) => c.json({ ok: true }));
+  app.post('/auth/logout', (c) => {
+    clearAuthCookies(c);
+    return c.json({ ok: true });
+  });
 
   app.get('/auth/me', authMiddleware, async (c) => {
     const auth = c.get('authUser');

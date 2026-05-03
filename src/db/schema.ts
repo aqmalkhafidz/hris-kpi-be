@@ -216,6 +216,19 @@ export const auditEntries = pgTable('audit_entries', {
   kraId: integer('kra_id'),
 });
 
+export const systemAuditEntries = pgTable('system_audit_entries', {
+  id: serial('id').primaryKey(),
+  timestamp: text('timestamp').notNull(),
+  actorUserId: integer('actor_user_id').notNull(),
+  actorName: text('actor_name').notNull(),
+  actorRole: text('actor_role').notNull(),
+  action: text('action').notNull(),
+  entityType: text('entity_type').notNull(),
+  entityId: integer('entity_id'),
+  entityLabel: text('entity_label'),
+  metadata: text('metadata'),
+});
+
 export const jobTitles = pgTable('job_titles', {
   id: serial('id').primaryKey(),
   code: text('code').notNull().default(''),
@@ -247,4 +260,5 @@ export type AppraisalRow = typeof appraisals.$inferSelect;
 export type KraRow = typeof kras.$inferSelect;
 export type EvidenceRow = typeof evidence.$inferSelect;
 export type AuditEntryRow = typeof auditEntries.$inferSelect;
+export type SystemAuditEntryRow = typeof systemAuditEntries.$inferSelect;
 export type CycleRow = typeof cycles.$inferSelect;

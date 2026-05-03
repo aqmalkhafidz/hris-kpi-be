@@ -10,6 +10,7 @@ import {
   employees,
   kras,
   positions,
+  systemAuditEntries,
   users,
 } from '../../db/schema.js';
 import { numberParam } from '../../util/params.js';
@@ -99,6 +100,7 @@ const calibrationSchema = z.object({
 export function registerReportsAndAuditRoutes(app: AppHono) {
   app.use('/reports/*', authMiddleware);
   app.use('/audit', authMiddleware);
+  app.use('/audit/*', authMiddleware);
 
   app.get('/reports/completed', async (c) => {
     requireRole(c.get('authUser'), 'hr');
@@ -209,6 +211,26 @@ export function registerReportsAndAuditRoutes(app: AppHono) {
         to_status: entry.toStatus ?? undefined,
         reason: entry.reason ?? undefined,
         kra_id: entry.kraId ?? undefined,
+      }))
+    );
+  });
+
+  app.get('/audit/system', async (c) => {
+    const actor = c.get('authUser');
+    requireRole(actor, 'hr');
+    const rows = await db.select().from(systemAuditEntries);
+    rows.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    return c.json(
+      rows.slice(0, 200).map((entry) => ({
+        timestamp: entry.timestamp,
+        actor_user_id: entry.actorUserId,
+        actor_name: entry.actorName,
+        actor_role: entry.actorRole,
+        action: entry.action,
+        entity_type: entry.entityType,
+        entity_id: entry.entityId,
+        entity_label: entry.entityLabel,
+        metadata: entry.metadata ? JSON.parse(entry.metadata) : undefined,
       }))
     );
   });
