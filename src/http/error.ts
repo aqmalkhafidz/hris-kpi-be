@@ -1,4 +1,5 @@
 import type { Context } from 'hono';
+import { log } from '../log.js';
 
 export class HttpError extends Error {
   constructor(
@@ -17,6 +18,13 @@ export function jsonError(c: Context, error: unknown) {
   if (error instanceof HttpError) {
     return c.json({ error: error.message }, error.status as never);
   }
-  console.error(error);
+  const msg = error instanceof Error ? error.message : 'Unknown error';
+  const stack = error instanceof Error ? error.stack : undefined;
+  log.error('unhandled error', {
+    path: c.req.path,
+    method: c.req.method,
+    error: msg,
+    stack,
+  });
   return c.json({ error: 'Internal server error' }, 500);
 }

@@ -13,6 +13,11 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   name: text('name').notNull(),
+  avatarUrl: text('avatar_url'),
+  phone: text('phone'),
+  emergencyName: text('emergency_name'),
+  emergencyPhone: text('emergency_phone'),
+  tokenVersion: integer('token_version').notNull().default(0),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
@@ -106,14 +111,19 @@ export const cycles = pgTable('cycles', {
 
 export const kraTemplates = pgTable('kra_templates', {
   id: serial('id').primaryKey(),
-  code: text('code').notNull().unique(),
   name: text('name').notNull(),
-  dept: text('dept').notNull(),
+  divId: integer('div_id')
+    .notNull()
+    .default(0)
+    .references(() => divisions.id, { onDelete: 'restrict' }),
   deptId: integer('dept_id')
     .notNull()
     .default(0)
     .references(() => departments.id, { onDelete: 'restrict' }),
-  level: text('level').notNull(),
+  posId: integer('pos_id')
+    .notNull()
+    .default(0)
+    .references(() => positions.id, { onDelete: 'restrict' }),
   version: text('version').notNull(),
   status: text('status').notNull(),
   updated: text('updated').notNull(),
@@ -237,3 +247,4 @@ export type AppraisalRow = typeof appraisals.$inferSelect;
 export type KraRow = typeof kras.$inferSelect;
 export type EvidenceRow = typeof evidence.$inferSelect;
 export type AuditEntryRow = typeof auditEntries.$inferSelect;
+export type CycleRow = typeof cycles.$inferSelect;

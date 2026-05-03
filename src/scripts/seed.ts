@@ -17,7 +17,8 @@ import {
   users,
 } from '../db/schema.js';
 
-const passwordHash = await bcrypt.hash('demo1234', 10);
+const seedPassword = process.env.SEED_PASSWORD ?? 'demo1234';
+const passwordHash = await bcrypt.hash(seedPassword, 12);
 
 const userRows = [
   { id: 1, name: 'Andi Pratama', email: 'andi@performa.id' },
@@ -732,7 +733,7 @@ async function main() {
     setSequence('kras', kraId - 1),
   ]);
   console.log(
-    'Seeded Performa demo data with numeric sequence IDs. Password for all users: demo1234'
+    'Seeded Performa demo data with numeric sequence IDs. Demo password is set via SEED_PASSWORD env (default applies in dev only).'
   );
 }
 

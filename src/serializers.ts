@@ -1,6 +1,7 @@
 import type {
   AppraisalRow,
   AuditEntryRow,
+  CycleRow,
   EvidenceRow,
   KraRow,
 } from './db/schema.js';
@@ -8,13 +9,17 @@ import type {
 export function serializeAppraisal(
   row: AppraisalRow,
   kras: Array<KraRow & { evidence: EvidenceRow[] }>,
-  auditLog: AuditEntryRow[]
+  auditLog: AuditEntryRow[],
+  cycle: CycleRow | null = null
 ) {
   return {
     id: row.id,
     userId: row.userId,
     cycleName: row.cycleName,
     cycleShort: row.cycleShort,
+    cycleStartDate: cycle?.startDate ?? null,
+    cycleEndDate: cycle?.endDate ?? null,
+    cycleSelfDeadline: cycle?.selfDeadline ?? null,
     status: row.status,
     reflection: row.reflection,
     reviewers: {

@@ -3,6 +3,7 @@ import { db } from './db/client.js';
 import {
   appraisals,
   auditEntries,
+  cycles,
   evidence,
   kras,
   kraTemplateItems,
@@ -11,14 +12,20 @@ import {
 import { fail } from './http/error.js';
 import { serializeAppraisal } from './serializers.js';
 
+async function loadCycleByName(name: string) {
+  const [row] = await db.select().from(cycles).where(eq(cycles.name, name));
+  return row ?? null;
+}
+
 export async function loadAppraisal(id: number) {
   const [row] = await db.select().from(appraisals).where(eq(appraisals.id, id));
   if (!row) return null;
-  return serializeAppraisal(
-    row,
-    await loadKras(row.id),
-    await loadAudit(row.id)
-  );
+  const [kraList, auditList, cycle] = await Promise.all([
+    loadKras(row.id),
+    loadAudit(row.id),
+    loadCycleByName(row.cycleName),
+  ]);
+  return serializeAppraisal(row, kraList, auditList, cycle);
 }
 
 export async function requireAppraisal(id: number) {
@@ -61,10 +68,90 @@ export async function loadAudit(appraisalId: number) {
 export async function serializeAppraisalRow(
   row: typeof appraisals.$inferSelect
 ) {
-  return serializeAppraisal(
-    row,
-    await loadKras(row.id),
-    await loadAudit(row.id)
+  const [kraList, auditList, cycle] = await Promise.all([
+    loadKras(row.id),
+    loadAudit(row.id),
+    loadCycleByName(row.cycleName),
+  ]);
+  return serializeAppraisal(row, kraList, auditList, cycle);
+}
+
+export async function serializeAppraisalRows(
+  rows: Array<typeof appraisals.$inferSelect>
+) {
+  if (!rows.length) return [];
+
+  const appraisalIds = rows.map((row) => row.id);
+  const cycleNames = [...new Set(rows.map((row) => row.cycleName))];
+  const [kraRows, auditRows, cycleRows] = await Promise.all([
+    db
+      .select()
+      .from(kras)
+      .where(inArray(kras.appraisalId, appraisalIds))
+      .orderBy(asc(kras.sortOrder), asc(kras.id)),
+    db
+      .select()
+      .from(auditEntries)
+      .where(inArray(auditEntries.appraisalId, appraisalIds))
+      .orderBy(asc(auditEntries.timestamp), asc(auditEntries.id)),
+    db.select().from(cycles).where(inArray(cycles.name, cycleNames)),
+  ]);
+  const evidenceRows = kraRows.length
+    ? await db
+        .select()
+        .from(evidence)
+        .where(
+          inArray(
+            evidence.kraId,
+            kraRows.map((kra) => kra.id)
+          )
+        )
+    : [];
+
+  const evidenceByKra = new Map<number, (typeof evidence.$inferSelect)[]>();
+  for (const item of evidenceRows) {
+    const items = evidenceByKra.get(item.kraId);
+    if (items) items.push(item);
+    else evidenceByKra.set(item.kraId, [item]);
+  }
+
+  const krasByAppraisal = new Map<
+    number,
+    Array<
+      typeof kras.$inferSelect & {
+        evidence: (typeof evidence.$inferSelect)[];
+      }
+    >
+  >();
+  for (const kra of kraRows) {
+    const items = krasByAppraisal.get(kra.appraisalId);
+    const nextKra = {
+      ...kra,
+      evidence: evidenceByKra.get(kra.id) ?? [],
+    };
+    if (items) items.push(nextKra);
+    else krasByAppraisal.set(kra.appraisalId, [nextKra]);
+  }
+
+  const auditByAppraisal = new Map<
+    number,
+    (typeof auditEntries.$inferSelect)[]
+  >();
+  for (const entry of auditRows) {
+    const items = auditByAppraisal.get(entry.appraisalId);
+    if (items) items.push(entry);
+    else auditByAppraisal.set(entry.appraisalId, [entry]);
+  }
+
+  const cycleByName = new Map(cycleRows.map((cycle) => [cycle.name, cycle]));
+
+  return rows.map((row) =>
+    serializeAppraisal(
+      row,
+      krasByAppraisal.get(row.id) ?? [],
+      auditByAppraisal.get(row.id) ?? [],
+      cycleByName.get(row.cycleName) ?? null
+    )
   );
 }
 
@@ -72,47 +159,50 @@ export async function replaceKras(
   appraisalId: number,
   nextKras: Array<Record<string, unknown>>
 ) {
-  await db.delete(kras).where(eq(kras.appraisalId, appraisalId));
-  for (const [index, raw] of nextKras.entries()) {
-    const inserted = await db
-      .insert(kras)
-      .values({
-        id: typeof raw.id === 'number' ? raw.id : undefined,
-        appraisalId,
-        title: String(raw.title ?? ''),
-        description: String(raw.description ?? ''),
-        target: String(raw.target ?? ''),
-        weight: Number(raw.weight ?? 0),
-        selfScore: Number(raw.self_score ?? 0),
-        selfComment: String(raw.self_comment ?? ''),
-        slScore: raw.sl_score == null ? null : Number(raw.sl_score),
-        slComment: raw.sl_comment == null ? null : String(raw.sl_comment),
-        hodScore: raw.hod_score == null ? null : Number(raw.hod_score),
-        hodComment: raw.hod_comment == null ? null : String(raw.hod_comment),
-        hodivScore: raw.hodiv_score == null ? null : Number(raw.hodiv_score),
-        hodivComment:
-          raw.hodiv_comment == null ? null : String(raw.hodiv_comment),
-        sortOrder: index,
-      })
-      .returning();
-    const kraId = inserted[0].id;
-    const evidenceItems = Array.isArray(raw.evidence)
-      ? (raw.evidence as Array<Record<string, unknown>>)
-      : [];
-    if (evidenceItems.length) {
-      await db.insert(evidence).values(
-        evidenceItems.map((item) => ({
-          kraId,
-          kind: String(item.kind ?? 'url'),
-          name: String(item.name ?? ''),
-          date: String(item.date ?? ''),
-          description:
-            item.description == null ? null : String(item.description),
-          url: item.url == null ? null : String(item.url),
-        }))
-      );
+  // All-or-nothing: a partial replace would leave the appraisal with KRAs
+  // missing or evidence orphaned.
+  await db.transaction(async (tx) => {
+    await tx.delete(kras).where(eq(kras.appraisalId, appraisalId));
+    for (const [index, raw] of nextKras.entries()) {
+      const inserted = await tx
+        .insert(kras)
+        .values({
+          appraisalId,
+          title: String(raw.title ?? ''),
+          description: String(raw.description ?? ''),
+          target: String(raw.target ?? ''),
+          weight: Number(raw.weight ?? 0),
+          selfScore: Number(raw.self_score ?? 0),
+          selfComment: String(raw.self_comment ?? ''),
+          slScore: raw.sl_score == null ? null : Number(raw.sl_score),
+          slComment: raw.sl_comment == null ? null : String(raw.sl_comment),
+          hodScore: raw.hod_score == null ? null : Number(raw.hod_score),
+          hodComment: raw.hod_comment == null ? null : String(raw.hod_comment),
+          hodivScore: raw.hodiv_score == null ? null : Number(raw.hodiv_score),
+          hodivComment:
+            raw.hodiv_comment == null ? null : String(raw.hodiv_comment),
+          sortOrder: index,
+        })
+        .returning();
+      const kraId = inserted[0].id;
+      const evidenceItems = Array.isArray(raw.evidence)
+        ? (raw.evidence as Array<Record<string, unknown>>)
+        : [];
+      if (evidenceItems.length) {
+        await tx.insert(evidence).values(
+          evidenceItems.map((item) => ({
+            kraId,
+            kind: String(item.kind ?? 'url'),
+            name: String(item.name ?? ''),
+            date: String(item.date ?? ''),
+            description:
+              item.description == null ? null : String(item.description),
+            url: item.url == null ? null : String(item.url),
+          }))
+        );
+      }
     }
-  }
+  });
 }
 
 export async function templatesWithItems() {
@@ -134,10 +224,10 @@ export async function templatesWithItems() {
     : [];
   return rows.map((row) => ({
     id: row.id,
-    code: row.code,
     name: row.name,
-    dept: row.dept,
-    level: row.level,
+    divId: row.divId,
+    deptId: row.deptId,
+    posId: row.posId,
     version: row.version,
     status: row.status,
     updated: row.updated,

@@ -7,13 +7,7 @@ export type AppraisalStatus =
   | 'hodiv_review'
   | 'acknowledge'
   | 'completed';
-export type AuditAction =
-  | 'submit'
-  | 'approve'
-  | 'return'
-  | 'acknowledge'
-  | 'score_change'
-  | 'comment';
+export type AuditAction = 'submit' | 'approve' | 'return' | 'acknowledge';
 
 export interface ActorInfo {
   userId: number;

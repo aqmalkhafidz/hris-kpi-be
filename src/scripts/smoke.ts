@@ -13,20 +13,26 @@ async function request(path: string, init?: RequestInit) {
 const login = await request('/auth/login', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ email: 'andi@performa.id', password: 'demo1234' }),
+  body: JSON.stringify({ email: 'aqmal@performa.id', password: 'demo1234' }),
 });
 
 const headers = { Authorization: `Bearer ${login.token}` };
-await request('/auth/me', { headers });
-await request('/appraisals/user/1', { headers });
-await request('/appraisals/1', { headers });
+const me = await request('/auth/me', { headers });
+const userId = me.user.id;
+await request(`/appraisals/user/${userId}`, { headers });
 
 const slLogin = await request('/auth/login', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ email: 'budi@performa.id', password: 'demo1234' }),
+  body: JSON.stringify({
+    email: 'aqmal.hakim@performa.id',
+    password: 'demo1234',
+  }),
 });
-await request('/reviews/queue?reviewerUserId=2&role=sl', {
+const slMe = await request('/auth/me', {
+  headers: { Authorization: `Bearer ${slLogin.token}` },
+});
+await request(`/reviews/queue?reviewerUserId=${slMe.user.id}&role=sl`, {
   headers: { Authorization: `Bearer ${slLogin.token}` },
 });
 
